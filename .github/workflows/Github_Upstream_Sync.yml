@@ -3,6 +3,7 @@ name: Upstream Sync
 permissions:
   contents: write
   pull-requests: write
+  workflows: write
 
 env:
   UPSTREAM_REPO: KuekHaoYang/KVideo
@@ -49,28 +50,24 @@ jobs:
           fi
 
           # 4. Try to merge (without committing)
-          git merge upstream/$UPSTREAM_BRANCH --no-commit --no-ff || true
-          
-          # 5. Remove .github/ changes to avoid GitHub App workflows permission error
-          # (GitHub App cannot push workflow files without workflows:write permission)
-          HAS_GITHUB=$(git diff --name-only --cached | grep "^.github/" | head -1 || echo "")
-          if [ -n "$HAS_GITHUB" ]; then
-            echo "Detected .github/ changes from upstream. Restoring to avoid workflows permission issue."
-            git restore --source=HEAD -- .github/
-            git reset HEAD -- .github/ 2>/dev/null || true
+          if git merge upstream/$UPSTREAM_BRANCH --no-commit --no-ff; then
+            echo "Merge successful (no conflicts)."
+          else
+            echo "Merge with conflicts. Committing resolution..."
+            git checkout --ours .
           fi
           
-          # 6. Check remaining changes
+          # 5. Check remaining changes
           REMAINING=$(git diff --name-only --cached | head -1 || git diff --name-only | head -1 || echo "")
           if [ -n "$REMAINING" ]; then
             echo "Staging remaining changes..."
             git add -A
             if git commit -m "chore: sync from upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"; then
-              echo "Merge successful. Pushing changes..."
+              echo "Pushing changes..."
               git push origin $TARGET_BRANCH
             fi
           else
-            echo "No remaining changes after removing .github/. Already up to date."
+            echo "No remaining changes. Already up to date."
           fi
 
       - name: Delete workflow runs
