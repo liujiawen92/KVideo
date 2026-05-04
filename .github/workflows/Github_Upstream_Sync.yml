@@ -13,7 +13,6 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      workflows: write
 
     steps:
       - name: Checkout target repo
@@ -42,7 +41,7 @@ jobs:
             exit 0
           fi
 
-          # 4. Try to merge (without committing)
+          # 4. Try to merge
           if git merge upstream/$UPSTREAM_BRANCH --no-commit --no-ff; then
             echo "Merge successful (no conflicts)."
           else
@@ -53,7 +52,6 @@ jobs:
           # 5. Check remaining changes
           REMAINING=$(git diff --name-only --cached | head -1 || git diff --name-only | head -1 || echo "")
           if [ -n "$REMAINING" ]; then
-            echo "Staging remaining changes..."
             git add -A
             if git commit -m "chore: sync from upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"; then
               echo "Pushing changes..."
