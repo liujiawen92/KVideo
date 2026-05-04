@@ -31,6 +31,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -x
+          
           # 1. Configure Git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -39,43 +41,44 @@ jobs:
           git remote add upstream "https://github.com/$UPSTREAM_REPO.git"
           git fetch upstream
 
-          # 3. Check for merge conflict (without actually merging)
+          # 3. Check merge status
           MERGE_BASE=$(git merge-base HEAD upstream/$UPSTREAM_BRANCH)
           UPSTREAM_LATEST=$(git rev-parse upstream/$UPSTREAM_BRANCH)
           
+          echo "MERGE_BASE=$MERGE_BASE"
+          echo "UPSTREAM_LATEST=$UPSTREAM_LATEST"
+          
           if [ "$MERGE_BASE" = "$UPSTREAM_LATEST" ]; then
-            echo "✅ Already up to date with upstream."
+            echo "Already up to date with upstream."
             exit 0
           fi
 
-          # 4. Try merge without committing
+          # 4. Try to merge
           git merge upstream/$UPSTREAM_BRANCH --no-commit --no-ff || true
           
-          # 5. Check if there are changes to .github/ directory
-          if git diff --name-only | grep -q "^.github/"; then
-            echo "⚠️ Upstream contains .github/ changes (workflow files). Removing them to avoid permissions issue..."
+          # 5. Show what changed
+          echo "Changed files:"
+          git diff --name-only --cached || git diff --name-only
+          
+          # 6. Check for .github/ changes and remove them
+          HAS_GITHUB=$(git diff --name-only --cached | grep "^.github/" | head -1 || echo "")
+          if [ -n "$HAS_GITHUB" ]; then
+            echo "Detected .github/ changes: $HAS_GITHUB"
+            echo "Restoring to avoid workflows permission issue..."
             git restore --source=HEAD -- .github/
+            git diff --cached -- .github/ > /dev/null 2>&1 && git reset HEAD -- .github/ || true
           fi
           
-          # 6. Check if there are any remaining changes
-          if git diff --name-only --cached | grep -q .; then
-            # Stage remaining changes
+          # 7. Check remaining changes
+          REMAINING=$(git diff --name-only --cached | head -1 || git diff --name-only | head -1 || echo "")
+          if [ -n "$REMAINING" ]; then
+            echo "Remaining changes: $REMAINING"
             git add -A
-            # Try to commit
-            if git commit -m "chore: sync from upstream $UPSTREAM_BRANCH"; then
-              echo "✅ Merge successful. Pushing changes..."
-              git push origin $TARGET_BRANCH
-            else
-              echo "ℹ️ No changes to commit (only .github/ was modified). Skipping push."
+            if git commit -m "chore: sync from upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"; then
+              echo "Merge successful. Pushing..."
+              git push origin $TARGET_BRANCH || echo "Push failed - checking if only workflow files were modified"
             fi
           else
-            echo "ℹ️ No changes after removing .github/. Already up to date."
+            echo "No remaining changes after removing .github/. Already up to date."
           fi
 
-      - name: Delete workflow runs
-        uses: Mattraks/delete-workflow-runs@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
-          retain_days: 1
-          keep_minimum_runs: 3
