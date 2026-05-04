@@ -1,16 +1,5 @@
 name: Upstream Sync
 
-permissions:
-  contents: write
-  pull-requests: write
-  workflows: write
-
-env:
-  UPSTREAM_REPO: KuekHaoYang/KVideo
-  UPSTREAM_BRANCH: main
-  TARGET_BRANCH: main
-  SYNC_BRANCH: upstream-sync-conflict
-
 on:
   schedule:
     - cron: "0 */6 * * *"
@@ -21,6 +10,10 @@ jobs:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
     if: ${{ github.event.repository.fork }}
+    permissions:
+      contents: write
+      pull-requests: write
+      workflows: write
 
     steps:
       - name: Checkout target repo
@@ -64,7 +57,7 @@ jobs:
             git add -A
             if git commit -m "chore: sync from upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"; then
               echo "Pushing changes..."
-              git push origin $TARGET_BRANCH
+              git push origin main
             fi
           else
             echo "No remaining changes. Already up to date."
@@ -77,3 +70,7 @@ jobs:
           repository: ${{ github.repository }}
           retain_days: 1
           keep_minimum_runs: 3
+
+env:
+  UPSTREAM_REPO: KuekHaoYang/KVideo
+  UPSTREAM_BRANCH: main
