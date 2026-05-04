@@ -20,10 +20,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync and Merge (with PR Fallback)
+      - name: Sync and Merge (with REST API fallback for workflows)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
         run: |
+          set -e
+          
           # 1. Configure Git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -49,16 +52,43 @@ jobs:
             git checkout --ours .
           fi
           
-          # 5. Check remaining changes
+          # 5. Check for .github/ changes - handle workflow files via REST API
+          HAS_GITHUB=$(git diff --name-only --cached | grep "^.github/" || git diff --name-only | grep "^.github/" || echo "")
+          
+          if [ -n "$HAS_GITHUB" ]; then
+            echo "Detected .github/ changes (including workflow files)."
+            
+            # For each workflow file changed by upstream, update via REST API
+            for wf in $(git diff --name-only --cached | grep "^.github/workflows/" || git diff --name-only | grep "^.github/workflows/"); do
+              echo "Updating workflow file via API: $wf"
+              # Get file content from staged area
+              CONTENT=$(git show ":$wf" 2>/dev/null | base64)
+              SHA_WF=$(curl -s -H "Authorization: token $GH_TOKEN" \
+                "https://api.github.com/repos/$REPO/contents/$wf" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('sha',''))")
+              if [ -n "$SHA_WF" ]; then
+                curl -s -X PUT \
+                  -H "Authorization: token $GH_TOKEN" \
+                  -H "Content-Type: application/json" \
+                  "https://api.github.com/repos/$REPO/contents/$wf" \
+                  -d "{\"message\":\"chore: sync workflow from upstream\",\"sha\":\"$SHA_WF\",\"content\":\"$CONTENT\"}" \
+                  && echo " ✓ Updated $wf via API"
+              fi
+            done
+            
+            # Remove .github/ from staging (already handled via API)
+            git restore --staged -- .github/ 2>/dev/null || git reset HEAD -- .github/ 2>/dev/null || true
+          fi
+          
+          # 6. Commit and push remaining (non-workflow) changes
           REMAINING=$(git diff --name-only --cached | head -1 || git diff --name-only | head -1 || echo "")
           if [ -n "$REMAINING" ]; then
             git add -A
             if git commit -m "chore: sync from upstream $(git rev-parse --short upstream/$UPSTREAM_BRANCH)"; then
-              echo "Pushing changes..."
+              echo "Pushing code changes..."
               git push origin main
             fi
           else
-            echo "No remaining changes. Already up to date."
+            echo "No remaining code changes."
           fi
 
       - name: Delete workflow runs
